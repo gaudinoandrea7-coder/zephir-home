@@ -28,6 +28,7 @@ import android.view.Window
 import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.GridView
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextClock
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
     private lateinit var bgA: ImageView
     private lateinit var bgB: ImageView
     private lateinit var dock: LinearLayout
+    private lateinit var dockScroll: HorizontalScrollView
     private var frontIsA = true
     private var shown: Bitmap? = null
     private var wallpapers: List<File> = emptyList()
@@ -105,12 +107,28 @@ class MainActivity : Activity() {
         dock.orientation = LinearLayout.HORIZONTAL
         dock.gravity = Gravity.CENTER
         dock.setPadding(dp(22), dp(18), dp(22), dp(10))
-        dock.background = GradientDrawable().apply { setColor(0x66121820); cornerRadius = dp(38).toFloat() }
+        dock.clipChildren = false
+        // Il dock sta dentro una vista scorrevole: con molte app la barra scorre invece di uscire dallo schermo.
+        dockScroll = HorizontalScrollView(this)
+        dockScroll.isHorizontalScrollBarEnabled = false
+        dockScroll.overScrollMode = View.OVER_SCROLL_NEVER
+        dockScroll.clipChildren = false
+        dockScroll.clipToPadding = false
+        dockScroll.background = GradientDrawable().apply { setColor(0x66121820); cornerRadius = dp(38).toFloat() }
+        dockScroll.addView(dock, FrameLayout.LayoutParams(-2, -2))
         val dlp = FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
-        dlp.bottomMargin = dp(48)
-        root.addView(dock, dlp)
+        dlp.setMargins(dp(48), 0, dp(48), dp(48))
+        root.addView(dockScroll, dlp)
 
         setContentView(root)
+
+        // Tiene l'icona selezionata al centro della barra mentre ti muovi con il telecomando.
+        dockScroll.viewTreeObserver.addOnGlobalFocusChangeListener { _, newFocus ->
+            if (newFocus != null && newFocus.parent === dock) {
+                val target = newFocus.left + newFocus.width / 2 - dockScroll.width / 2
+                dockScroll.smoothScrollTo(if (target < 0) 0 else target, 0)
+            }
+        }
     }
 
     private fun bg() = ImageView(this).apply {
@@ -256,6 +274,7 @@ class MainActivity : Activity() {
             dock.addView(t)
         }
         dock.addView(tile("Tutte le app", GlyphView(this, GlyphView.GRID), false) { showAll(apps) })
+        dockScroll.scrollTo(0, 0)
         dock.post { dock.getChildAt(0)?.requestFocus() }
     }
 

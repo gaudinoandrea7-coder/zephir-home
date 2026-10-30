@@ -11,6 +11,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -78,25 +80,25 @@ class MainActivity : Activity() {
         )
         root.addView(scrim, FrameLayout.LayoutParams(-1, resources.displayMetrics.heightPixels * 2 / 5, Gravity.BOTTOM))
 
-        // Orologio e data in alto a destra
-        val clockBox = LinearLayout(this)
-        clockBox.orientation = LinearLayout.VERTICAL
-        clockBox.gravity = Gravity.END
+        // Barra in alto: Wi-Fi, Bluetooth, Impostazioni, ora
+        val topBar = LinearLayout(this)
+        topBar.orientation = LinearLayout.HORIZONTAL
+        topBar.gravity = Gravity.CENTER_VERTICAL
+        topBar.setPadding(dp(16), dp(8), dp(22), dp(8))
+        topBar.background = GradientDrawable().apply { setColor(0x66121820); cornerRadius = dp(30).toFloat() }
+        topBar.addView(topButton(GlyphView(this, GlyphView.WIFI), Settings.ACTION_WIFI_SETTINGS))
+        topBar.addView(topButton(GlyphView(this, GlyphView.BT), Settings.ACTION_BLUETOOTH_SETTINGS))
+        topBar.addView(topButton(GlyphView(this, GlyphView.GEAR), Settings.ACTION_SETTINGS))
         val time = TextClock(this).apply {
             format24Hour = "HH:mm"; format12Hour = "HH:mm"
-            setTextColor(Color.WHITE); textSize = 40f
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            setShadowLayer(8f, 0f, 2f, 0x99000000.toInt())
+            setTextColor(Color.WHITE); textSize = 22f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setPadding(dp(14), 0, 0, 0)
         }
-        val date = TextClock(this).apply {
-            format24Hour = "EEEE d MMMM"; format12Hour = "EEEE d MMMM"
-            setTextColor(0xDDFFFFFF.toInt()); textSize = 16f
-            setShadowLayer(6f, 0f, 2f, 0x99000000.toInt())
-        }
-        clockBox.addView(time); clockBox.addView(date)
-        val clp = FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END)
-        clp.setMargins(0, dp(36), dp(56), 0)
-        root.addView(clockBox, clp)
+        topBar.addView(time)
+        val tlp = FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END)
+        tlp.setMargins(0, dp(28), dp(48), 0)
+        root.addView(topBar, tlp)
 
         // Dock
         dock = LinearLayout(this)
@@ -254,11 +256,33 @@ class MainActivity : Activity() {
             dock.addView(t)
         }
         dock.addView(tile("Tutte le app", GlyphView(this, GlyphView.GRID), false) { showAll(apps) })
-        dock.addView(tile("Impostazioni", GlyphView(this, GlyphView.GEAR), false) {
-            try { startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            catch (t: Throwable) { toast("Impostazioni non disponibili") }
-        })
         dock.post { dock.getChildAt(0)?.requestFocus() }
+    }
+
+    private fun openSettings(action: String) {
+        try { startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        catch (t: Throwable) {
+            try { startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            catch (t2: Throwable) { toast("Impostazioni non disponibili") }
+        }
+    }
+
+    /** Pulsante rotondo della barra in alto; si illumina e ingrandisce al focus. */
+    private fun topButton(glyph: View, action: String): View {
+        val box = FrameLayout(this)
+        val bg = GradientDrawable().apply { setColor(0x00FFFFFF); cornerRadius = dp(22).toFloat() }
+        box.background = bg
+        box.addView(glyph, FrameLayout.LayoutParams(-1, -1))
+        box.isFocusable = true
+        box.isClickable = true
+        box.setOnClickListener { openSettings(action) }
+        box.setOnFocusChangeListener { _, focused ->
+            bg.setColor(if (focused) 0x66FFFFFF else 0x00FFFFFF)
+            val s = if (focused) 1.15f else 1f
+            box.animate().scaleX(s).scaleY(s).setDuration(140).start()
+        }
+        box.layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { setMargins(dp(3), 0, dp(3), 0) }
+        return box
     }
 
     /** Tessera con icona arrotondata; al focus si ingrandisce e mostra il nome (stile tvOS). */
@@ -336,13 +360,33 @@ class MainActivity : Activity() {
 
     /** Glifi disegnati a mano per evitare caratteri mancanti nei font della TV. */
     private class GlyphView(ctx: Context, private val kind: Int) : View(ctx) {
-        companion object { const val GRID = 0; const val GEAR = 1 }
+        companion object { const val GRID = 0; const val GEAR = 1; const val WIFI = 2; const val BT = 3 }
         private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         override fun onDraw(c: Canvas) {
             val w = width.toFloat(); val h = height.toFloat()
             if (kind == GRID) {
+                p.style = Paint.Style.FILL
                 val r = w * 0.055f
                 for (i in 0..2) for (j in 0..2) c.drawCircle(w * (0.28f + 0.22f * i), h * (0.28f + 0.22f * j), r, p)
+            } else if (kind == WIFI) {
+                p.style = Paint.Style.STROKE; p.strokeWidth = w * 0.08f; p.strokeCap = Paint.Cap.ROUND
+                val cx = w / 2; val cy = h * 0.74f
+                for (r in floatArrayOf(w * 0.17f, w * 0.30f, w * 0.43f)) {
+                    c.drawArc(RectF(cx - r, cy - r, cx + r, cy + r), 225f, 90f, false, p)
+                }
+                p.style = Paint.Style.FILL
+                c.drawCircle(cx, cy, w * 0.05f, p)
+            } else if (kind == BT) {
+                p.style = Paint.Style.STROKE; p.strokeWidth = w * 0.07f
+                p.strokeCap = Paint.Cap.ROUND; p.strokeJoin = Paint.Join.ROUND
+                val path = Path()
+                path.moveTo(w * 0.30f, h * 0.34f)
+                path.lineTo(w * 0.70f, h * 0.68f)
+                path.lineTo(w * 0.50f, h * 0.84f)
+                path.lineTo(w * 0.50f, h * 0.16f)
+                path.lineTo(w * 0.70f, h * 0.32f)
+                path.lineTo(w * 0.30f, h * 0.66f)
+                c.drawPath(path, p)
             } else {
                 p.style = Paint.Style.STROKE; p.strokeWidth = w * 0.07f
                 c.drawCircle(w / 2, h / 2, w * 0.17f, p)

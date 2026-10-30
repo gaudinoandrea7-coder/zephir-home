@@ -286,7 +286,7 @@ class MainActivity : Activity() {
     }
 
     /** Tessera con icona arrotondata; al focus si ingrandisce e mostra il nome (stile tvOS). */
-    private fun tile(label: String, content: View, alwaysLabel: Boolean, onClick: () -> Unit): LinearLayout {
+    private fun tile(label: String, content: View, alwaysLabel: Boolean, interactive: Boolean = true, onClick: () -> Unit): LinearLayout {
         val box = FrameLayout(this)
         box.background = GradientDrawable().apply { setColor(0x33FFFFFF); cornerRadius = dp(20).toFloat() }
         box.clipToOutline = true
@@ -310,6 +310,7 @@ class MainActivity : Activity() {
         lp.setMargins(dp(4), 0, dp(4), 0)
         col.layoutParams = lp
 
+        if (interactive) {
         col.isFocusable = true
         col.isClickable = true
         col.setOnClickListener { onClick() }
@@ -318,6 +319,7 @@ class MainActivity : Activity() {
             box.animate().scaleX(s).scaleY(s).setDuration(140).start()
             box.elevation = if (focused) dp(12).toFloat() else 0f
             if (!alwaysLabel) tv.animate().alpha(if (focused) 1f else 0f).setDuration(140).start()
+        }
         }
         return col
     }
@@ -335,7 +337,7 @@ class MainActivity : Activity() {
         frame.addView(title, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
         val grid = GridView(this).apply {
             numColumns = 6; verticalSpacing = dp(14); horizontalSpacing = dp(4)
-            selector = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
+            selector = GradientDrawable().apply { setColor(0x40FFFFFF); cornerRadius = dp(20).toFloat() }
             clipToPadding = false; setPadding(0, dp(12), 0, dp(40))
         }
         grid.adapter = object : ArrayAdapter<AppEntry>(this, 0, apps) {
@@ -344,11 +346,12 @@ class MainActivity : Activity() {
                 val icon = ImageView(context).apply {
                     setImageDrawable(e.icon); scaleType = ImageView.ScaleType.FIT_CENTER; setPadding(dp(8), dp(8), dp(8), dp(8))
                 }
-                val t = tile(e.label, icon, true) { dlg.dismiss(); launch(e) }
-                t.setOnLongClickListener { toggleFav(e.pkg, e.label); true }
-                return t
+                // Le tessere della griglia non sono focalizzabili: selezione, OK e pressione lunga li gestisce la GridView.
+                return tile(e.label, icon, true, false) { }
             }
         }
+        grid.setOnItemClickListener { _, _, pos, _ -> dlg.dismiss(); launch(apps[pos]) }
+        grid.setOnItemLongClickListener { _, _, pos, _ -> toggleFav(apps[pos].pkg, apps[pos].label); true }
         val glp = FrameLayout.LayoutParams(-1, -1)
         glp.topMargin = dp(36)
         frame.addView(grid, glp)

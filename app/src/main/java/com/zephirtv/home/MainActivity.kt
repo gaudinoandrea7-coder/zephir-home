@@ -16,6 +16,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.media.tv.TvContract
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -28,7 +29,7 @@ import android.view.Window
 import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.GridView
-import android.widget.HorizontalScrollView
+import android.widget.ScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextClock
@@ -46,7 +47,11 @@ class MainActivity : Activity() {
     private lateinit var bgA: ImageView
     private lateinit var bgB: ImageView
     private lateinit var dock: LinearLayout
-    private lateinit var dockScroll: HorizontalScrollView
+    private lateinit var dockScroll: ScrollView
+    private var firstTile: View? = null
+
+    /** App nascoste dal launcher (non disinstallate): se il nome del pacchetto o il titolo contiene una di queste parole. */
+    private val hiddenKeywords = listOf("scores365", "365scores")
     private var frontIsA = true
     private var shown: Bitmap? = null
     private var wallpapers: List<File> = emptyList()
@@ -102,33 +107,24 @@ class MainActivity : Activity() {
         tlp.setMargins(0, dp(28), dp(48), 0)
         root.addView(topBar, tlp)
 
-        // Dock
+        // Griglia delle app: 4 per riga, una nuova riga ogni 4 app in piu'.
+        // Sta dentro una vista scorrevole: se le righe sono troppe scorre verticalmente seguendo la selezione.
         dock = LinearLayout(this)
-        dock.orientation = LinearLayout.HORIZONTAL
-        dock.gravity = Gravity.CENTER
-        dock.setPadding(dp(22), dp(18), dp(22), dp(10))
+        dock.orientation = LinearLayout.VERTICAL
+        dock.setPadding(dp(22), dp(20), dp(22), dp(12))
         dock.clipChildren = false
-        // Il dock sta dentro una vista scorrevole: con molte app la barra scorre invece di uscire dallo schermo.
-        dockScroll = HorizontalScrollView(this)
-        dockScroll.isHorizontalScrollBarEnabled = false
+        dockScroll = ScrollView(this)
+        dockScroll.isVerticalScrollBarEnabled = false
         dockScroll.overScrollMode = View.OVER_SCROLL_NEVER
         dockScroll.clipChildren = false
         dockScroll.clipToPadding = false
         dockScroll.background = GradientDrawable().apply { setColor(0x66121820); cornerRadius = dp(38).toFloat() }
         dockScroll.addView(dock, FrameLayout.LayoutParams(-2, -2))
         val dlp = FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
-        dlp.setMargins(dp(48), 0, dp(48), dp(48))
+        dlp.setMargins(dp(48), dp(104), dp(48), dp(40))
         root.addView(dockScroll, dlp)
 
         setContentView(root)
-
-        // Tiene l'icona selezionata al centro della barra mentre ti muovi con il telecomando.
-        dockScroll.viewTreeObserver.addOnGlobalFocusChangeListener { _, newFocus ->
-            if (newFocus != null && newFocus.parent === dock) {
-                val target = newFocus.left + newFocus.width / 2 - dockScroll.width / 2
-                dockScroll.smoothScrollTo(if (target < 0) 0 else target, 0)
-            }
-        }
     }
 
     private fun bg() = ImageView(this).apply {
@@ -229,10 +225,13 @@ class MainActivity : Activity() {
             for (ri in pm.queryIntentActivities(q, 0)) {
                 val pkg = ri.activityInfo.packageName
                 if (pkg == packageName || !seen.add(pkg)) continue
+                val label = ri.loadLabel(pm).toString()
+                val hay = (pkg + " " + label).lowercase().replace(" ", "")
+                if (hiddenKeywords.any { hay.contains(it) }) continue
                 val i = Intent(Intent.ACTION_MAIN).addCategory(cat)
                     .setClassName(pkg, ri.activityInfo.name)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                out.add(AppEntry(pkg, ri.loadLabel(pm).toString(), i, ri.loadIcon(pm)))
+                out.add(AppEntry(pkg, label, i, ri.loadIcon(pm)))
             }
         }
         return out.sortedBy { it.label.lowercase() }
@@ -248,8 +247,8 @@ class MainActivity : Activity() {
 
     private fun toggleFav(pkg: String, label: String) {
         val cur = (prefs.getString("favs", "") ?: "").split(",").filter { it.isNotBlank() }.toMutableList()
-        if (cur.contains(pkg)) { cur.remove(pkg); toast("$label rimossa dal dock") }
-        else { cur.add(pkg); toast("$label aggiunta al dock") }
+        if (cur.contains(pkg)) { cur.remove(pkg); toast("$label rimossa dalla home") }
+        else { cur.add(pkg); toast("$label aggiunta alla home") }
         prefs.edit().putString("favs", cur.joinToString(",")).apply()
         buildDock()
     }
@@ -263,7 +262,9 @@ class MainActivity : Activity() {
     private fun buildDock() {
         val apps = loadApps()
         val byPkg = apps.associateBy { it.pkg }
-        dock.removeAllViews()
+
+        val tiles = ArrayList<View>()
+        tiles.add(tile("TV", GlyphView(this, GlyphView.TV), false) { openLiveTv(apps) })
         for (pkg in favorites(byPkg)) {
             val e = byPkg[pkg] ?: continue
             val icon = ImageView(this).apply {
@@ -271,11 +272,42 @@ class MainActivity : Activity() {
             }
             val t = tile(e.label, icon, false) { launch(e) }
             t.setOnLongClickListener { toggleFav(e.pkg, e.label); true }
-            dock.addView(t)
+            tiles.add(t)
         }
-        dock.addView(tile("Tutte le app", GlyphView(this, GlyphView.GRID), false) { showAll(apps) })
+        tiles.add(tile("Tutte le app", GlyphView(this, GlyphView.GRID), false) { showAll(apps) })
+
+        dock.removeAllViews()
+        var row: LinearLayout? = null
+        for ((i, t) in tiles.withIndex()) {
+            if (i % 4 == 0) {
+                val r = LinearLayout(this)
+                r.orientation = LinearLayout.HORIZONTAL
+                r.clipChildren = false
+                r.minimumWidth = dp(4 * 138)
+                val rlp = LinearLayout.LayoutParams(-2, -2)
+                if (i > 0) rlp.topMargin = dp(10)
+                dock.addView(r, rlp)
+                row = r
+            }
+            row?.addView(t)
+        }
+        firstTile = tiles[0]
         dockScroll.scrollTo(0, 0)
-        dock.post { dock.getChildAt(0)?.requestFocus() }
+        dock.post { firstTile?.requestFocus() }
+    }
+
+    /** Apre la TV in diretta (canali dell'antenna): cerca l'app TV installata, altrimenti prova l'accesso ai canali di sistema. */
+    private fun openLiveTv(apps: List<AppEntry>) {
+        val known = listOf("com.google.android.tv", "com.android.tv", "com.google.android.apps.tv.livetv")
+        val labelRx = Regex("^(tv|live ?tv|live channels|tv live|tv in diretta|canali tv|tv digitale|digital tv|dtv|antenna( tv)?|tuner)$")
+        val app = apps.firstOrNull { known.contains(it.pkg) }
+            ?: apps.firstOrNull { labelRx.matches(it.label.trim().lowercase()) }
+        if (app != null) { launch(app); return }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, TvContract.Channels.CONTENT_URI).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (t: Throwable) {
+            toast("App TV non trovata. Usa il tasto Sorgenti/Input del telecomando e scegli Antenna/TV.")
+        }
     }
 
     private fun openSettings(action: String) {
@@ -350,7 +382,7 @@ class MainActivity : Activity() {
         frame.setBackgroundColor(0xE60E131A.toInt())
         frame.setPadding(dp(56), dp(40), dp(56), dp(24))
         val title = TextView(this).apply {
-            text = "Tutte le app   ·   tieni premuto OK per aggiungere/togliere dal dock"
+            text = "Tutte le app   ·   tieni premuto OK per aggiungere/togliere dalla home"
             setTextColor(0xCCFFFFFF.toInt()); textSize = 15f
         }
         frame.addView(title, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
@@ -382,11 +414,18 @@ class MainActivity : Activity() {
 
     /** Glifi disegnati a mano per evitare caratteri mancanti nei font della TV. */
     private class GlyphView(ctx: Context, private val kind: Int) : View(ctx) {
-        companion object { const val GRID = 0; const val GEAR = 1; const val WIFI = 2; const val BT = 3 }
+        companion object { const val GRID = 0; const val GEAR = 1; const val WIFI = 2; const val BT = 3; const val TV = 4 }
         private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         override fun onDraw(c: Canvas) {
             val w = width.toFloat(); val h = height.toFloat()
-            if (kind == GRID) {
+            if (kind == TV) {
+                p.style = Paint.Style.STROKE; p.strokeWidth = w * 0.06f
+                p.strokeCap = Paint.Cap.ROUND; p.strokeJoin = Paint.Join.ROUND
+                c.drawRoundRect(RectF(w * 0.18f, h * 0.38f, w * 0.82f, h * 0.76f), w * 0.07f, w * 0.07f, p)
+                c.drawLine(w * 0.5f, h * 0.38f, w * 0.36f, h * 0.2f, p)
+                c.drawLine(w * 0.5f, h * 0.38f, w * 0.64f, h * 0.2f, p)
+                c.drawLine(w * 0.36f, h * 0.86f, w * 0.64f, h * 0.86f, p)
+            } else if (kind == GRID) {
                 p.style = Paint.Style.FILL
                 val r = w * 0.055f
                 for (i in 0..2) for (j in 0..2) c.drawCircle(w * (0.28f + 0.22f * i), h * (0.28f + 0.22f * j), r, p)
